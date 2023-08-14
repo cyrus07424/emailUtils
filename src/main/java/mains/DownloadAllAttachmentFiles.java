@@ -4,11 +4,17 @@ import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
+
+import com.fasterxml.jackson.databind.JsonNode;
 
 import constants.Configurations;
 import jakarta.mail.Address;
@@ -22,6 +28,7 @@ import jakarta.mail.UIDFolder;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeUtility;
+import utils.JacksonHelper;
 
 /**
  * 全ての添付ファイルをダウンロード.
@@ -32,9 +39,19 @@ import jakarta.mail.internet.MimeUtility;
 public class DownloadAllAttachmentFiles {
 
 	/**
+	 * デバッグモード.
+	 */
+	private static final boolean DEBUG_MODE = false;
+
+	/**
 	 * ダウンロード対象のフォルダ名.
 	 */
 	private static final String TARGET_FOLDER_NAME = "CHANGEME";
+
+	/**
+	 * 処理済みUID一覧のファイル.
+	 */
+	private static final File PROCESSED_UID_LIST_FILE = new File("data/processed.json");
 
 	/**
 	 * main.
@@ -42,7 +59,17 @@ public class DownloadAllAttachmentFiles {
 	 * @param args
 	 */
 	public static void main(String[] args) {
+		System.out.println("start.");
 		try {
+			// 処理済みUID一覧を取得
+			Set<Long> uidSet = new HashSet<>();
+			if (PROCESSED_UID_LIST_FILE.exists()) {
+				JsonNode jsonNode = JacksonHelper.getObjectMapper().readTree(PROCESSED_UID_LIST_FILE);
+				uidSet = StreamSupport.stream(jsonNode.spliterator(), false)
+						.map(v -> v.asLong())
+						.collect(Collectors.toSet());
+			}
+
 			// http://connector.sourceforge.net/doc-files/Properties.html
 			Properties properties = System.getProperties();
 
@@ -63,11 +90,11 @@ public class DownloadAllAttachmentFiles {
 
 					// 全てのメッセージの件数を取得
 					int totalMessages = folder.getMessageCount();
-					System.out.println("Total messages = " + totalMessages);
+					System.out.println("Total messages: " + totalMessages);
 
 					// 新しいメッセージの件数を取得
 					int newMessages = folder.getNewMessageCount();
-					System.out.println("New messages = " + newMessages);
+					System.out.println("New messages: " + newMessages);
 
 					// メッセージの一覧を取得
 					Message[] messageArray = folder.getMessages();
@@ -76,75 +103,95 @@ public class DownloadAllAttachmentFiles {
 					for (Message message : messageArray) {
 						try {
 							// UID を取得
-							Long messageId = uidFolder.getUID(message);
-							System.out.println("UID = " + messageId);
+							Long uid = uidFolder.getUID(message);
+							System.out.println("UID: " + uid);
 
-							// From
-							Address[] address = message.getFrom();
-							String xFromEmail = "";
-							String fromEmail = "";
-							if (address != null) {
-								InternetAddress internetAddress = (InternetAddress) address[0];
-								xFromEmail = MimeUtility.decodeText(internetAddress.toString());
-								fromEmail = internetAddress.getAddress();
-							}
-							System.out.println("xFromEmail = " + xFromEmail);
-							System.out.println("fromEmail" + fromEmail);
+							// 処理済みUID一覧に存在しない場合
+							if (!uidSet.contains(uid)) {
+								// From
+								Address[] address = message.getFrom();
+								String xFromEmail = "";
+								String fromEmail = "";
+								if (address != null) {
+									InternetAddress internetAddress = (InternetAddress) address[0];
+									xFromEmail = MimeUtility.decodeText(internetAddress.toString());
+									fromEmail = internetAddress.getAddress();
+								}
+								System.out.println("xFromEmail: " + xFromEmail);
+								System.out.println("fromEmail: " + fromEmail);
 
-							// Subject
-							String subject = message.getSubject();
-							if (StringUtils.isNotBlank(subject)) {
-								String decodedSubject = MimeUtility.decodeText(subject);
-								System.out.println("subject = " + decodedSubject);
-							}
-
-							// 受信日時
-							Date date = message.getSentDate();
-							SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
-							String dateText = sdf.format(date);
-							System.out.println("date = " + dateText);
-
-							// 本文
-							String content = "";
-							if (message.isMimeType("text/plain")) {
-								content = message.getContent().toString();
-							} else if (message.isMimeType("multipart/*")) {
-								Multipart multipart = (Multipart) message.getContent();
-								// マルチパートの先頭
-								content = multipart.getBodyPart(0).getContent().toString();
-
-								if (multipart.getBodyPart(1).isMimeType("text/html")) {
-									String htmlText = multipart.getBodyPart(1).getContent().toString();
-									System.out.println("HtmlText = " + htmlText);
+								// Subject
+								String subject = message.getSubject();
+								if (StringUtils.isNotBlank(subject)) {
+									String decodedSubject = MimeUtility.decodeText(subject);
+									System.out.println("subject: " + decodedSubject);
 								}
 
-								// マルチパートの件数を取得
-								int multipartCount = multipart.getCount();
+								// 受信日時
+								Date date = message.getSentDate();
+								SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+								String dateText = sdf.format(date);
+								System.out.println("date: " + dateText);
 
-								// 全てのマルチパートに対して実行
-								for (int i = 0; i < multipartCount; i++) {
-									// マルチパートを取得
-									MimeBodyPart bodyPart = (MimeBodyPart) multipart.getBodyPart(i);
+								// 本文
+								String content = "";
+								if (message.isMimeType("text/plain")) {
+									content = message.getContent().toString();
+								} else if (message.isMimeType("multipart/*")) {
+									Multipart multipart = (Multipart) message.getContent();
+									// マルチパートの先頭
+									content = multipart.getBodyPart(0).getContent().toString();
 
-									// マルチパートをファイルに保存
-									saveMultipart(fromEmail, bodyPart, messageId, i);
+									if (multipart.getBodyPart(1).isMimeType("text/html")) {
+										String htmlText = multipart.getBodyPart(1).getContent().toString();
+										System.out.println("HtmlText: " + htmlText);
+									}
+
+									// マルチパートの件数を取得
+									int multipartCount = multipart.getCount();
+
+									// 全てのマルチパートに対して実行
+									for (int i = 0; i < multipartCount; i++) {
+										// マルチパートを取得
+										MimeBodyPart bodyPart = (MimeBodyPart) multipart.getBodyPart(i);
+
+										// マルチパートをファイルに保存
+										saveMultipart(fromEmail, bodyPart, uid, i);
+									}
 								}
-							}
 
-							System.out.println("Body = " + content);
+								System.out.println("Body: " + content);
+
+								// 処理済みUID一覧に追加
+								uidSet.add(uid);
+
+								// デバッグモードの場合は終了
+								if (DEBUG_MODE) {
+									break;
+								}
+							} else {
+								System.out.println("処理済みです: " + uid);
+							}
 						} catch (Exception e) {
 							e.printStackTrace();
 						}
 					}
 				}
 			}
+
+			// 処理済みUID一覧を出力
+			JacksonHelper.getObjectMapper().writeValue(PROCESSED_UID_LIST_FILE,
+					JacksonHelper.getObjectMapper().valueToTree(uidSet));
 		} catch (Exception e) {
 			e.printStackTrace();
+		} finally {
+			System.out.println("done.");
 		}
 	}
 
 	/**
 	 * マルチパートをファイルに保存.
+	 *
 	 * @param from
 	 * @param bodypart
 	 * @param messageId
@@ -163,7 +210,7 @@ public class DownloadAllAttachmentFiles {
 			// メッセージIDからファイル名を作成
 			fileName = String.format("%d%d", messageId, attachmentIndex);
 		}
-		System.out.println("ファイル名 = " + fileName);
+		System.out.println("fileName: " + fileName);
 
 		// ファイルを作成
 		File file = new File(String.format("data/%s/%s", from, fileName));
@@ -177,7 +224,7 @@ public class DownloadAllAttachmentFiles {
 						FilenameUtils.getExtension(fileName));
 				file = new File(file.getParentFile(), newFileName);
 			} else {
-				String newFileName = String.format("%s_%d", FilenameUtils.getBaseName(fileName));
+				String newFileName = String.format("%s_%d", FilenameUtils.getBaseName(fileName), i);
 				file = new File(file.getParentFile(), newFileName);
 			}
 		}

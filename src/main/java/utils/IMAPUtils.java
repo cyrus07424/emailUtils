@@ -13,6 +13,8 @@ import org.apache.commons.net.imap.IMAPSClient;
 
 /**
  * IMAPUtils.
+ * @see https://github.com/apache/commons-net/blob/master/src/main/java/org/apache/commons/net/examples/mail/IMAPUtils.java
+ * @see https://github.com/apache/commons-net/blob/master/src/main/java/org/apache/commons/net/examples/mail/Utils.java
  *
  * @author cyrus
  */
