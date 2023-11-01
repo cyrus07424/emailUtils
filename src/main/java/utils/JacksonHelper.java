@@ -2,7 +2,7 @@ package utils;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategy;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 
 /**
  * Jacksonヘルパー.
@@ -19,6 +19,6 @@ public class JacksonHelper {
 	public static final ObjectMapper getObjectMapper() {
 		return new ObjectMapper()
 				.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-				.setPropertyNamingStrategy(PropertyNamingStrategy.SNAKE_CASE);
+				.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
 	}
 }

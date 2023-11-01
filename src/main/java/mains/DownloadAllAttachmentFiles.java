@@ -1,7 +1,6 @@
 package mains;
 
 import java.io.File;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashSet;
@@ -12,7 +11,10 @@ import java.util.stream.StreamSupport;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.tika.Tika;
+import org.apache.tika.config.TikaConfig;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -20,7 +22,6 @@ import constants.Configurations;
 import jakarta.mail.Address;
 import jakarta.mail.Folder;
 import jakarta.mail.Message;
-import jakarta.mail.MessagingException;
 import jakarta.mail.Multipart;
 import jakarta.mail.Session;
 import jakarta.mail.Store;
@@ -99,6 +100,11 @@ public class DownloadAllAttachmentFiles {
 					// メッセージの一覧を取得
 					Message[] messageArray = folder.getMessages();
 
+					if (DEBUG_MODE) {
+						// FIXME メッセージの一覧をシャッフル
+						ArrayUtils.shuffle(messageArray);
+					}
+
 					// 全てのメッセージに対して実行
 					for (Message message : messageArray) {
 						try {
@@ -133,34 +139,49 @@ public class DownloadAllAttachmentFiles {
 								String dateText = sdf.format(date);
 								System.out.println("date: " + dateText);
 
-								// 本文
-								String content = "";
+								// コンテンツタイプによって分岐
 								if (message.isMimeType("text/plain")) {
-									content = message.getContent().toString();
+									// 本文を取得
+									String content = message.getContent().toString();
+									System.out.println("content: " + content);
 								} else if (message.isMimeType("multipart/*")) {
+									// マルチパートを取得
 									Multipart multipart = (Multipart) message.getContent();
-									// マルチパートの先頭
-									content = multipart.getBodyPart(0).getContent().toString();
-
-									if (multipart.getBodyPart(1).isMimeType("text/html")) {
-										String htmlText = multipart.getBodyPart(1).getContent().toString();
-										System.out.println("HtmlText: " + htmlText);
-									}
 
 									// マルチパートの件数を取得
 									int multipartCount = multipart.getCount();
 
 									// 全てのマルチパートに対して実行
 									for (int i = 0; i < multipartCount; i++) {
-										// マルチパートを取得
+										// ボディパートを取得
 										MimeBodyPart bodyPart = (MimeBodyPart) multipart.getBodyPart(i);
+										System.out.println("contentType[" + i + "]: " + bodyPart.getContentType());
 
-										// マルチパートをファイルに保存
-										saveMultipart(fromEmail, bodyPart, uid, i);
+										// コンテンツタイプがtext/plainの場合はスキップ
+										if (bodyPart.isMimeType("text/plain")) {
+											// 本文を取得
+											String content = bodyPart.getContent().toString();
+											System.out.println("content: " + content);
+											continue;
+										}
+
+										// コンテンツタイプがtext/htmlの場合はスキップ
+										if (bodyPart.isMimeType("text/html")) {
+											// HTML本文を取得
+											String html = bodyPart.getContent().toString();
+											System.out.println("html: " + html);
+											continue;
+										}
+
+										// FIXME コンテンツタイプがmultipart/alternativeの場合はスキップ
+										if (bodyPart.isMimeType("multipart/alternative")) {
+											continue;
+										}
+
+										// ボディパートをファイルに保存
+										saveBodyPart(fromEmail, bodyPart, uid, i);
 									}
 								}
-
-								System.out.println("Body: " + content);
 
 								// 処理済みUID一覧に追加
 								uidSet.add(uid);
@@ -190,22 +211,21 @@ public class DownloadAllAttachmentFiles {
 	}
 
 	/**
-	 * マルチパートをファイルに保存.
+	 * ボディパートをファイルに保存.
 	 *
 	 * @param from
-	 * @param bodypart
+	 * @param bodyPart
 	 * @param messageId
 	 * @param attachmentIndex
-	 * @throws MessagingException
-	 * @throws IOException
+	 * @throws Exception 
 	 */
-	private static void saveMultipart(String from, MimeBodyPart bodypart, Long messageId, int attachmentIndex)
-			throws MessagingException, IOException {
+	private static void saveBodyPart(String from, MimeBodyPart bodyPart, Long messageId, int attachmentIndex)
+			throws Exception {
 		// ファイル名を取得
-		String fileName = bodypart.getFileName();
+		String fileName = bodyPart.getFileName();
 		if (StringUtils.isNotBlank(fileName)) {
 			// ファイル名をデコード
-			fileName = MimeUtility.decodeText(bodypart.getFileName());
+			fileName = MimeUtility.decodeText(bodyPart.getFileName());
 		} else {
 			// メッセージIDからファイル名を作成
 			fileName = String.format("%d%d", messageId, attachmentIndex);
@@ -231,6 +251,32 @@ public class DownloadAllAttachmentFiles {
 		FileUtils.createParentDirectories(file);
 
 		// ファイルを保存
-		bodypart.saveFile(file);
+		bodyPart.saveFile(file);
+
+		// ファイルの拡張子が存在しない場合
+		if (StringUtils.isBlank(FilenameUtils.getExtension(file.getName()))) {
+			// ファイル内容から適切な拡張子を取得
+			String speculatedExtension = getSpeculatedExtension(file);
+
+			// 新しいファイル名を作成
+			String newFileName = String.format("%s.%s", file.getName(), speculatedExtension);
+			File newFile = new File(file.getParentFile(), newFileName);
+
+			// ファイル名を変更
+			if (!file.renameTo(newFile)) {
+				System.err.println("ファイル名の変更に失敗: " + newFile.getAbsolutePath());
+			}
+		}
+	}
+
+	/**
+	 * ファイル内容から適切な拡張子を取得.
+	 *
+	 * @param file
+	 * @return
+	 * @throws Exception
+	 */
+	private static String getSpeculatedExtension(File file) throws Exception {
+		return TikaConfig.getDefaultConfig().getMimeRepository().forName(new Tika().detect(file)).getExtension();
 	}
 }
