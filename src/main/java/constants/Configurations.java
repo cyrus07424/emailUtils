@@ -41,9 +41,9 @@ public interface Configurations {
 	 */
 	public static URI getImapUri() {
 		if (IMAP_USE_SSL) {
-			return URI.create(String.format("imaps://%s:%s@/%s", USERNAME, PASSWORD, IMAP_SERVER));
+			return URI.create(String.format("imaps://%s:%s@%s", USERNAME, PASSWORD, IMAP_SERVER));
 		} else {
-			return URI.create(String.format("imap://%s:%s@/%s", USERNAME, PASSWORD, IMAP_SERVER));
+			return URI.create(String.format("imap://%s:%s@%s", USERNAME, PASSWORD, IMAP_SERVER));
 		}
 	}
 }
